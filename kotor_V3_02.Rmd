@@ -1,0 +1,979 @@
+---
+title: "Star Wars: Knights of the Old Republic – Combat Analysis FAQ"
+author: "StatsJedi"
+date: "12/18/2020"
+output: 
+  html_document:
+      toc: true
+      toc_depth: 3
+      toc_float: true
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(readxl)
+library(knitr)
+
+#opts_chunk$set(echo = TRUE)
+
+best_value <- function(myData){
+  temp <- as.numeric(myData[1,3:11])
+  max_value <- max(temp)
+  max_col <- ncol(myData)
+  max_position <- grep(max_value, temp)+2 #which.max() only gives first maximum value location
+  myData[1,3:max_col] <- 0
+  myData[1,max_position] <- max_value
+  return(myData)
+}
+
+best_value_force <- function(myData){
+  temp <- as.numeric(myData[1,4:11])
+  max_value <- max(temp)
+  max_col <- ncol(myData)
+  max_position <- grep(max_value, temp)+3 #which.max() only gives first maximum value location
+  myData[1,4:max_col] <- 0
+  myData[1,max_position] <- max_value
+  return(myData)
+}
+
+map_mods <- function(myFactors){ #this calculates the bonuses for each feat/style/force
+  if(all(myFactors$styles=="Dueling 1")){
+    myFactors$modifiers1 <- myFactors$modifiers1+1
+  }
+  if(all(myFactors$styles=="Dueling 2")){
+    myFactors$modifiers1 <- myFactors$modifiers1+2
+  }
+  if(all(myFactors$styles=="Dueling 3")){
+    myFactors$modifiers1 <- myFactors$modifiers1+3
+  }
+  if(all(myFactors$styles=="Balanced Two-Weapon Fighting 1")){
+    myFactors$n2 <- 1
+    myFactors$modifiers1 <- myFactors$modifiers1-4
+    myFactors$modifiers2 <- myFactors$modifiers2-6
+  }
+  if(all(myFactors$styles=="Balanced Two-Weapon Fighting 2")){
+    myFactors$n2 <- 1
+    myFactors$modifiers1 <- myFactors$modifiers1-2
+    myFactors$modifiers2 <- myFactors$modifiers2-4
+  }
+  if(all(myFactors$styles=="Balanced Two-Weapon Fighting 3")){
+    myFactors$n2 <- 1
+    myFactors$modifiers1 <- myFactors$modifiers1-0
+    myFactors$modifiers2 <- myFactors$modifiers2-2
+  }
+  if(all(myFactors$styles=="Unbalanced Two-Weapon Fighting 1")){
+    myFactors$n2 <- 1
+    myFactors$modifiers1 <- myFactors$modifiers1-6
+    myFactors$modifiers2 <- myFactors$modifiers2-6
+  }
+  if(all(myFactors$styles=="Unbalanced Two-Weapon Fighting 2")){
+    myFactors$n2 <- 1
+    myFactors$modifiers1 <- myFactors$modifiers1-4
+    myFactors$modifiers2 <- myFactors$modifiers2-4
+  }
+  if(all(myFactors$styles=="Unbalanced Two-Weapon Fighting 3")){
+    myFactors$n2 <- 1
+    myFactors$modifiers1 <- myFactors$modifiers1-2
+    myFactors$modifiers2 <- myFactors$modifiers2-2
+  }
+  if(all(myFactors$feats=="Flurry/Rapid Shot 1")){
+    myFactors$n1 <- myFactors$n1+1
+    myFactors$modifiers1 <- myFactors$modifiers1-4
+    myFactors$modifiers2 <- myFactors$modifiers2-4
+  }
+  if(all(myFactors$feats=="Flurry/Rapid Shot 2")){
+    myFactors$n1 <- myFactors$n1+1
+    myFactors$modifiers1 <- myFactors$modifiers1-2
+    myFactors$modifiers2 <- myFactors$modifiers2-2
+  }
+  if(all(myFactors$feats=="Flurry/Rapid Shot 3")){
+    myFactors$n1 <- myFactors$n1+1
+    myFactors$modifiers1 <- myFactors$modifiers1-1
+    myFactors$modifiers2 <- myFactors$modifiers2-1
+  }
+  if(all(myFactors$feats=="Critical Strike/Sniper Shot 1")){
+    myFactors$crit_bonus <- 2
+  }
+  if(all(myFactors$feats=="Critical Strike/Sniper Shot 2")){
+    myFactors$crit_bonus <- 3
+  }
+  if(all(myFactors$feats=="Critical Strike/Sniper Shot 3")){
+    myFactors$crit_bonus <- 4
+  }
+  if(all(myFactors$feats=="Power Attack/Power Blast 1")){
+    myFactors$power_attack <- 5
+    myFactors$modifiers1 <- myFactors$modifiers1-3
+    myFactors$modifiers2 <- myFactors$modifiers2-3
+  }
+  if(all(myFactors$feats=="Power Attack/Power Blast 2")){
+    myFactors$power_attack <- 8
+    myFactors$modifiers1 <- myFactors$modifiers1-3
+    myFactors$modifiers2 <- myFactors$modifiers2-3
+  }
+  if(all(myFactors$feats=="Power Attack/Power Blast 3")){
+    myFactors$power_attack <- 10
+    myFactors$modifiers1 <- myFactors$modifiers1-3
+    myFactors$modifiers2 <- myFactors$modifiers2-3
+  }
+  if(all(myFactors$force=="Knight Speed")){
+    myFactors$n1 <- myFactors$n1+1
+  }
+  if(all(myFactors$force=="Master Speed")){
+    myFactors$n1 <- myFactors$n1+2
+  }
+  return(myFactors) 
+}
+
+process_inputs <- function(myData){
+  myData <- 
+    myData %>% 
+  filter(DMG_base_main >= DMG_base_offhand) %>% 
+  mutate(styles=as.character(styles),
+         feats=as.character(feats),
+         force=as.character(force),
+         DMG_base_offhand=replace(DMG_base_offhand, grepl("Dueling", styles), 0)) %>% 
+  group_by(styles, feats, force) %>% 
+  group_split() %>% 
+  map(map_mods) %>%
+  bind_rows() %>%       
+  mutate(total_damage=n1*DMG_base_main*(1.05-0.05*(DEF_ATK-modifiers1))*
+           (1+threat_main*crit_bonus+keen_main*threat_main)+              
+           n1*power_attack*(1.05-0.05*(DEF_ATK-modifiers1))+
+           n2*DMG_base_offhand*(1.05-0.05*(DEF_ATK-modifiers2))*
+           (1+threat_offhand*crit_bonus+keen_offhand*threat_offhand)+
+           n1*power_attack*(1.05-0.05*(DEF_ATK-modifiers2))) %>% 
+  mutate(total_damage=replace(total_damage, total_damage<0, 0)) %>% 
+  select(feats, styles, force, DEF_ATK, DMG_base_main, DMG_base_offhand, keen_main, 
+         keen_offhand, threat_main, threat_offhand, total_damage) %>% 
+  distinct() %>% 
+    mutate(tier=gsub("[[:alpha:]]*|[[:punct:]]|[[:blank:]]", "", feats), #remove letters, /, -
+         feat_name=gsub(" [[:digit:]]", "", feats), #remove numbers
+         style_name=gsub(" [[:digit:]]", "", styles)) %>% 
+  mutate(tier=paste("Tier", tier, sep=" "),
+         feat_name=gsub("/", "/ ", feat_name)) %>% 
+  select(-feats, -styles)
+  
+  return(myData)
+}
+
+keenness_choices <- c(0, 1) #0=not keen, 1=keen
+
+threat_range_choices <- c(0.05, 0.1) #0.05=20-20, 0.1=19-20
+
+DEF_ATK <- seq(2, 20, 1)
+
+damage_range <- seq(1, 30, 1)
+```
+
+
+## What's New
+
+* Reformatted the equations to make them easier to read
+* Redid the plots to take advantage of advances in the GGPlot2 graphing library, improvements in computer hardware, and my skill set
+* Made an interactive dashboard at https://statsjedi.shinyapps.io/shiny_kotor/ so people can explore the effects of different build parameters on offense
+* Redid the report in RMarkdown to make it easier to update in the future
+* Posted all the code for this FAQ, the analysis, and the interactive dashboard at my GitHub
+
+## Introduction
+
+Hello, everyone, and welcome to my FAQ. I finally got around to playing *Star Wars: Knights of the Old Republic* recently, and after a couple of playthroughs started asking myself some questions, like
+
+* Is it better to improve accuracy, damage, or the chance of landing a critical hit?
+* Are two weapons better than one?
+* Is it better to use balanced or unbalanced weapons when using two-weapon fighting?
+* Which is better – Critical Strike/Sniper Shot, Flurry/Rapid Shot, or Power Attack/Power Blast?
+
+I've seen a lot of discussions on the internet about these questions, but no definite answers. Being a bit of a statistics nerd, I took advantage of the fact that the rules in *KOTOR* (and underlying *3rd Edition D20 System*) can be defined mathematically, and took a stab at answering things analytically. This was fun to put together, and I hope useful and maybe even fun for you, the reader.
+
+If you're in a hurry, skip to Section 6, where I'll answer these questions. If you want to read the rationale behind my recommendations and see some nice graphs, go to Sections 3 and 4. For those who want a little more context, or want to double-check my math (not a bad idea!), then Section 2 is for you. Section 5 has some enemy stats that are useful for comparison.
+
+## Building the Model
+
+Faint hearts or the impatient may want to skip this section, where I'll derive the equations I used to model things in *KOTOR*. Math nerds, on the other hand, will probably enjoy this part.
+
+The core of the model is that the average total amount of damage ($Damage_{total}$) a character can deal in an attack is governed by the probability of landing a hit ($P_{hit}$) and the damage of the weapon used ($Weapon_{damage}$), represented by Equation 1.
+
+
+\begin{equation}
+  Damage_{total} = Weapon_{damage} \times P_{hit} 
+\tag{1}
+\end{equation}
+
+
+However, *KOTOR* doesn't give you a $P_{hit}$ statistic. Instead, it relies on the attacker's attack bonus (ATK) and the defender's defense (DEF), along with the roll of a virtual 20-sided die -- a random number generated between 1 and 20. If the die roll comes up 1 then the attack automatically misses, regardless of what ATK and DEF are. By the same token, if the die roll is 20, the attack automatically succeeds. If the roll is 2-19, the random number is added to ATK. If this sum is greater than or equal to DEF, the attack succeeds. 
+
+Since there always is a 1-in-20 chance of automatically missing, we know that the maximum probability of hitting is 0.95, or 95%. We also always have a 1-in-20 chance of automatically hitting, so our minimum probability of hitting is 0.05, or 5%. The maximum probability of hitting has to occur when the difference between DEF and ATK is 2, because at this point any roll other than 1 (remember, an automatic miss) will result in a hit. By the same token, the minimum probability of hitting occurs when the difference between DEF and ATK is 20, the maximum value we can roll on our virtual die. We can express this as Equation 2 when (DEF-ATK) is between 2 and 20.
+
+
+\begin{equation}
+  P_{hit} =1.05 - 0.05 \times (DEF-ATK)
+  \tag{2}
+\end{equation}
+
+
+Now, we need to think about what happens when there is a critical attack. *KOTOR* handles this in a pretty complicated fashion, which comes from its *D20 System* heritage. When the attack roll is made to determine if an attack hits, a check is made to see if the roll falls within the critical threat range of the weapon used in the attack. If the attack hits and the roll is within the critical threat range, then a second 20-sided die roll is made. If the second die roll plus ATK is greater than the defender's DEF, then the attack is a critical strike and does double damage. It's a little confusing and cumbersome, but them's the rules. If you're still confused, there are some good examples of how this mechanic works at NWNWiki.
+
+We can use this description to further refine our model in Equation 1 to get Equations 3 and 4.
+
+
+\begin{equation}
+  Damage_{total} = Weapon_{damage} \times P_{hit\:normal} + 2 \times Weapon_{damage} \times P_{hit\:critical} 
+  \tag{3}
+\end{equation}
+
+\begin{equation}
+  P_{hit} = P_{hit\:normal} + P_{hit\:critical}
+  \tag{4}
+\end{equation}
+
+
+To determine P.hit.critical, we need to look at the threat ranges of weapons in KOTOR. According to FAQs on the internet, there are 71 weapons. Forty-five have threat ranges of 20, 25 have threat ranges of 19-20, and one has a threat range of 17-20. The corresponding probabilities of rolling a 20-sided die and getting a value inside these ranges are shown in Table 1, below.
+
+Threat Range | 20 | 19-20
+-------------|----|------
+$P_{threat}$ |0.05|0.10
+
+Getting a roll that falls inside the threat range of a weapon is only part of the battle, however. Next, we must reroll the 20-sided die and make a successful attack, the probability of which is governed by P.hit. Therefore,
+
+
+\begin{equation}
+  P_{hit\:critical} = P_{threat} \times P_{hit}
+  \tag{5}
+\end{equation}
+
+
+
+\begin{equation}
+  P_{hit\:normal} = (1-P_{threat}) \times P_{hit}
+  \tag{6}
+\end{equation}
+
+
+
+Putting all this together, we find that
+
+\begin{equation}
+  Damage_{total} = Weapon_{damage} \times P_{hit} \times  (1+P_{threat})
+  \tag{7}
+\end{equation}
+
+
+Recasting everything in terms of DEF and ATK, we see that
+
+\begin{equation}
+  Damage_{total} = Weapon_{damage} \times [1.05 - 0.05 \times (DEF-ATK)] \times (1+P_{threat})
+  \tag{8}
+\end{equation}
+
+
+If a weapon has the **keen** property, the threat range is doubled. However, this doesn't stack with the expansion of the critical threat range granted by the Critical Strike and Sniper Shot feats. (Basically it's $Critical\:Threat_{Total}=Critical\:Threat \times Multiplier + Keen$, not $Critical\:Threat_{Total}=(Critical\:Threat + Keen) \times Multiplier$)
+
+Factoring in all the modifications for the different fighting style and combat feats, we get Equation 9, which everything is based on going forwards.
+
+\begin{equation}
+Damage_{total} = n_1 \times Weapon_{damage\:1} \times [1.05 - 0.05 \times (DEF-ATK-Modifiers_1)] \times \\\
+  (1+P_{threat\:1} \times Crit_{bonus}+Keen_1) + \\\
+  n_1 \times Power\:Attack \times [1.05 - 0.05 \times (DEF-ATK_1-Modifiers_1)] + \\\
+  n_2 \times Weapon_{damage\:2} \times [1.05 - 0.05 \times (DEF-ATK-Modifiers_2)] \times \\\
+  (1+P_{threat\:2} \times Crit_{bonus}+Keen_2) + \\\
+  n_2 \times Power\:Attack \times [1.05 - 0.05 \times (DEF-ATK-Modifiers_2)]
+  \tag{9}
+\end{equation}
+
+
+where $n_1$ is the number of main-hand attacks, $n_2$ is the number of off hand attacks, $Crit_{bonus}$ is the critical threat multiplier, and $Power\:Attack$ is the power attack bonus. $Modifiers_1$ and $Modifiers_2$ are the attack modifiers granted by the various feats for the main and off hand. $Weapon_{damage\:1}$ and $Weapon_{damage\:2}$, $ATK_1$ and $ATK_2$, $P_{threat\:1}$ and $P_{threat\:2}$, and $Keen_1$ and $Keen_1$ are just the same stats above, but for the main and off hand weapons.
+
+The values of all the different variables are summarized below in Table 3. In addition to all the above feats, Jedi powers provide additional bonuses, shown in Table 4. The tables include modifiers to the character's own defense value for completeness, but these values aren't part of Equation 9.
+
+Table 2: Feats and their corresponding variables for equation 9. 
+
+
+Feat                        | Tier| Model Variables  | Other Modifiers
+----------------------------|-----|:----------------:|:----------------:
+Dueling                     |1    |$$Modifier_1 +1$$ | Defense +1
+Dueling                     |2    |$$Modifier_1 +2$$ | Defense +2
+Dueling                     |3    |$$Modifier_1 +3$$ | Defense +3
+Two-Weapon Fighting         |1    |$$n_2 = 2 \\\
+                                    Modifier_1 -6\:(unbalanced\;offhand\;weapon) \\\
+                                    Modifier_1 -4\:(balanced\;offhand\;weapon) \\\
+                                    Modifier_2 -6$$  |
+Two-Weapon Fighting         |2    |$$n_2 = 2 \\\
+                                    Modifier_1 -4\:(unbalanced\;offhand\;weapon) \\\
+                                    Modifier_1 -2\:(balanced\;offhand\;weapon) \\\
+                                    Modifier_2 -4$$  |
+Two-Weapon Fighting         |2    |$$n_2 = 2 \\\
+                                    Modifier_1 -2\:(unbalanced\;offhand\;weapon) \\\
+                                    Modifier_1 -0\:(balanced\;offhand\;weapon) \\\
+                                    Modifier_2 -2$$  |
+Flurry/Rapid Shot           |1    |$$n_1 +1 \\\
+                                    Modifier_1 -4 \\\
+                                    Modifier_2 -4$$  |
+Flurry/Rapid Shot           |2    |$$n_1 +1 \\\
+                                    Modifier_1 -2 \\\
+                                    Modifier_2 -2$$  |
+Flurry/Rapid Shot           |3    |$$n_1 +1 \\\
+                                    Modifier_1 -1 \\\
+                                    Modifier_2 -1$$  |
+Critical Strike/Sniper Shot |1    |$$Crit_{bonus} = 2$$| Defense -5
+Critical Strike/Sniper Shot |2    |$$Crit_{bonus} = 3$$| Defense -5
+Critical Strike/Sniper Shot |3    |$$Crit_{bonus} = 4$$| Defense -5
+Power Attack/Power Blast    |1    |$$Modifier_1 -4 \\\
+                                    Modifier_2 -4 \\\
+                                    Power\:Attack = 5$$|
+Power Attack/Power Blast    |2    |$$Modifier_1 -2 \\\
+                                    Modifier_2 -2 \\\
+                                    Power\:Attack = 8$$|
+Power Attack/Power Blast    |3    |$$Modifier_1 -1 \\\
+                                    Modifier_2 -1 \\\
+                                    Power\:Attack = 10$$|
+                                
+Table 3: Force powers and their corresponding variables for Equation 9. 
+
+Force Power       | Model Variables | Other Modifiers
+------------------|:---------------:|:---------------:
+Burst of Speed    |                 | Defense +2
+Knight Speed      |$n_1 +1$         | Defense +4
+Master Speed      |$n_1 +2$         | Defense +4
+
+## Running the Model
+
+The next step is to run Equation 11 and calculate the average total damage per combat round for each. But before we can do that, we need to determine what our (DEF-ATK), threat range, and weapon damage values are.
+
+For weapon damage, let's look at Figure 1, which shows the threat range and base damage ranges for the weapons in KOTOR. We can see that the base damage ranges run from 1 to 20 points, while the average damages of the weapons run from 1 to 13 points. Note these do not include things like damage bonuses from having a high STR attribute or modifying weapons. Surprisingly for a sci-fi game (at least to me), melee weapons tend to be much more damaging than blasters or heavy weapons. Canderous, Carth, and Zaalbar may come with ranged weapons, but they all have high Strength attributes and will deal even more damage with melee weapons instead. 
+
+Based on Figure 1, I'm going to set the damage range from 1 to 30 points in order to cover cases like dual wielding and damage bonuses.
+
+
+```{r weapon_chart, include=FALSE}
+kotor_weapons <- read_excel("C:/Users/pwatson/Documents/R/kotor/version 3/kotor weapons.xlsx") 
+
+kotor_weapons <- 
+  kotor_weapons %>% 
+  mutate(mean = (min+max)/2) %>% 
+  arrange(mean, name) %>% 
+  mutate(order=seq(1, nrow(kotor_weapons), 1),
+         threat=paste(threat, "-20", sep="")) 
+  
+p.kotor_weapons <- 
+  kotor_weapons %>% 
+  ggplot(aes(x=as.factor(order), y=mean, ymin=min, ymax=max, color=type, shape=threat,
+             linetype=balance))+
+  geom_point(size=3)+
+  geom_errorbar(size=1, width=0)+
+  coord_flip()+
+  scale_color_brewer(palette = "Set1")+
+  labs(color="Weapon Type", shape="Critical Threat Range", linetype="Balance")+
+  scale_x_discrete(labels=kotor_weapons$name)+
+  scale_y_continuous(sec.axis = dup_axis()) +
+  xlab("")+
+  ylab("Base Weapon Damage")+
+  ggtitle("Figure 1. Weapon Overivew")+
+  theme(axis.title.x.top = element_blank())
+
+ggsave("kotor_weapons.png", p.kotor_weapons, width=8, height=12, units="in")
+```
+
+![](kotor_weapons.png)
+
+To summarize, these are the inputs for our model:
+
+* $P_{threat}$ -- 0.05 and 0.10, which covers 99% of all weapons in *KOTOR*
+* $Keen$ – 0, 0.05 (when $P_{threat}$ = 0.05), and 0.10 (when $P_{threat}$ = 0.10)
+* $DEF-ATK$ -- in order to cover the full range of $P_{hit}$ values (0.95 to 0.05), our $DEF-ATK$ values need to be between 2 and 20
+* $Weapon_{damage\:1}$ and $Weapon_{damage\:2}$ -- 1 to 30 each, and the damage of the offhand weapon will always be less than or equal to that of the main weapon
+* Fighting Styles -- None, Dueling, Two-Weapon Fighting (unbalanced), Two-Weapon Fighting (balanced)
+* Combat Feats -- None, Critical Strike/Sniper Shot, Flurry/Rapid Shot, Power Attack/Power Blast
+
+### What Feats Are Best?
+
+Based on the model. it turns out there is no single combination of combat feats that is most damaging under every situation. The biggest influences are average weapon damage, the likelihood of hitting your target, and whether or not a character is a Jedi.
+
+#### Non-Jedi Characters
+
+Figures 2-4 show what combat feats give the maximum damage per round in different situations. The color corresponds to the best feats, the x-axis is the difference between the target's defense and your attack bonus, and the y-axis is the average damage for your main-hand and (if equipped) off-hand weapons. To get the average damage when wielding one weapon, add the minimum damage and maximum damage, then divide by 2. To get the average damage when wielding two weapons, add the minimum damage and maximum damage for both weapons and divide by 4.
+
+For the Tier 1 feats, Power Attack/Power Blast is better when your weapon damage is low, while Flurry/Rapid Shot is better when your average weapon damage is higher. Due to the fact that Critical Strike/Sniper Shot has no penalties to strike, it is best for targets with a very high defense. Two-Weapon Fighting doesn't make the cut at Tier 1 because the combined penalties from using it with Flurry/Rapid Shot or Power Attack/Power Blast make it hard to hit things. 
+
+
+```{r pickbest_1, echo=FALSE, message=FALSE, warning=FALSE}
+model_factors_level1_noforce <- expand.grid(
+  feats=c(#"None", #turns out none doesn't matter
+          "Flurry/Rapid Shot 1", 
+          "Critical Strike/Sniper Shot 1", 
+          "Power Attack/Power Blast 1"),
+  styles=c(#"None",  #turns out none doesn't matter
+           "Dueling 1",
+           "Balanced Two-Weapon Fighting 1",
+           "Unbalanced Two-Weapon Fighting 1"),
+  force="None",
+  DEF_ATK=DEF_ATK,
+  DMG_base_main=damage_range,
+  DMG_base_offhand=damage_range,
+  keen_main=keenness_choices,
+  keen_offhand=keenness_choices,
+  threat_main=threat_range_choices,
+  threat_offhand=threat_range_choices,
+  n1=1,
+  n2=0,
+  modifiers1=0,
+  modifiers2=0,
+  crit_bonus=0,
+  power_attack=0)
+
+model_factors_level1_noforce <- process_inputs(model_factors_level1_noforce)
+
+model_factors_level1_noforce %>% 
+  filter(tier=="Tier 1") %>% 
+  group_by(feat_name, style_name, DEF_ATK, DMG_base_main) %>% 
+  summarize(total_damage=max(total_damage)) %>% 
+  pivot_wider(id_cols=c("DEF_ATK", "DMG_base_main"), values_from="total_damage", 
+              names_from=c("feat_name", "style_name")) %>% 
+  group_by(DEF_ATK, DMG_base_main) %>% 
+  group_split() %>% 
+  map(best_value) %>% 
+  bind_rows() %>% 
+  pivot_longer(cols=c(-DEF_ATK, -DMG_base_main)) %>% 
+  mutate(name=replace(name, DMG_base_main > 20 & name=="Power Attack/ Power Blast_Dueling",
+                      "Critical Strike/ Sniper Shot_Dueling")) %>% 
+  mutate(name=gsub("_", " + ", name)) %>% 
+  mutate(name=str_wrap(name, width=25)) %>% 
+  filter(value > 0) %>% 
+  #filter(!grepl("Two", name)) %>%   
+  ggplot(aes(x=DEF_ATK, y=DMG_base_main, fill=name))+
+  geom_tile(color="black")+
+  #scale_fill_brewer(palette = "Set1")+
+  #scale_fill_manual(values=c("#e41a1c", "#4daf4a", "#ff7f00"))+
+  scale_fill_manual(values=c("#1f78b4", "#a6cee3", "#b2df8a", "#fb9a99"))+
+  xlab("DEF-ATK")+
+  ylab("Average of Main-Hand and\n(if applicable) Off-hand Damage")+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+
+  labs(fill="")+
+  ggtitle("Figure 2. Maximum Damage from Tier 1 Combat Feats")
+
+```
+
+For the Tier 2 feats, we see that Two Weapon Fighting is starting to become useful when your target's defense is low, but Dueling remains a better choice otherwise. Once again, Power Attack/Power Blast works best when your weapons are weak, while Flurry/Rapid Shot is a better choice when your weapons are stronger. Finally, Critical Strike/Sniper Shot works best against targets with a very high defense.
+
+```{r pickbest_2, echo=FALSE, message=FALSE, warning=FALSE}
+
+model_factors_level2_noforce <- expand.grid(
+  feats=c(#"None",
+          "Flurry/Rapid Shot 2", 
+          "Critical Strike/Sniper Shot 2", 
+          "Power Attack/Power Blast 2"),
+  styles=c(#"None",
+           "Dueling 2",
+           "Balanced Two-Weapon Fighting 2",
+           "Unbalanced Two-Weapon Fighting 2"),
+  force="None",
+  DEF_ATK=DEF_ATK,
+  DMG_base_main=damage_range,
+  DMG_base_offhand=damage_range,
+  keen_main=keenness_choices,
+  keen_offhand=keenness_choices,
+  threat_main=threat_range_choices,
+  threat_offhand=threat_range_choices,
+  n1=1,
+  n2=0,
+  modifiers1=0,
+  modifiers2=0,
+  crit_bonus=0,
+  power_attack=0)
+
+
+model_factors_level2_noforce <- process_inputs(model_factors_level2_noforce)
+
+model_factors_level2_noforce %>% 
+  filter(tier=="Tier 2") %>% 
+  group_by(feat_name, style_name, DEF_ATK, DMG_base_main) %>% 
+  summarize(total_damage=max(total_damage)) %>% 
+  pivot_wider(id_cols=c("DEF_ATK", "DMG_base_main"), values_from="total_damage", 
+              names_from=c("feat_name", "style_name")) %>% 
+  group_by(DEF_ATK, DMG_base_main) %>% 
+  group_split() %>% 
+  map(best_value) %>% 
+  bind_rows() %>% 
+  pivot_longer(cols=c(-DEF_ATK, -DMG_base_main)) %>% 
+  filter(name != "Critical Strike/ Sniper Shot_Balanced Two-Weapon Fighting") %>% 
+  mutate(name=replace(name, DMG_base_main > 20 & name=="Power Attack/ Power Blast_Dueling",
+                      "Critical Strike/ Sniper Shot_Dueling")) %>% 
+  mutate(name=gsub("_", " + ", name)) %>% 
+  mutate(name=str_wrap(name, width=25)) %>% 
+  filter(value > 0) %>% 
+  ggplot(aes(x=DEF_ATK, y=DMG_base_main, fill=name))+
+  geom_tile(color="black")+
+  #scale_fill_brewer(palette = "Set1")+
+  #scale_fill_manual(values=c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00"))+
+  scale_fill_manual(values = c("#a6cee3", "#33a02c", "#b2df8a", "#e31a1c", "#fb9a99"))+
+  xlab("DEF-ATK")+
+  ylab("Average of Main-Hand and\n(if applicable) Off-hand Damage")+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+
+  labs(fill="")+
+  ggtitle("Figure 3. Maximum Damage from Tier 2 Combat Feats")
+
+```
+
+At Tier 3, the to-hit penalties for Two-Weapon Fighting, Flurry/Rapid Shot, and Power Attack/Power Blast have gotten so low that it is feasible to combine them. Still, the same pattern is seen: Two-Weapon Fighting is best for low-defense targets, and Dueling for high-defense targets. Select Power Attack/Power Blast when your weapons don't deal a lot of damage, and Flurry/Rapid Shot when they do.
+
+```{r pickbest_3, echo=FALSE, message=FALSE, warning=FALSE}
+model_factors_level3_noforce <- expand.grid(
+  feats=c(#"None",
+          "Flurry/Rapid Shot 3", 
+          "Critical Strike/Sniper Shot 3", 
+          "Power Attack/Power Blast 3"),
+  styles=c(#"None",
+           "Dueling 3",
+           "Balanced Two-Weapon Fighting 3",
+           "Unbalanced Two-Weapon Fighting 3"),
+  force="None",
+  DEF_ATK=DEF_ATK,
+  DMG_base_main=damage_range,
+  DMG_base_offhand=damage_range,
+  keen_main=keenness_choices,
+  keen_offhand=keenness_choices,
+  threat_main=threat_range_choices,
+  threat_offhand=threat_range_choices,
+  n1=1,
+  n2=0,
+  modifiers1=0,
+  modifiers2=0,
+  crit_bonus=0,
+  power_attack=0)
+
+model_factors_level3_noforce <- process_inputs(model_factors_level3_noforce)
+
+model_factors_level3_noforce %>% 
+  filter(tier=="Tier 3") %>% 
+  group_by(feat_name, style_name, DEF_ATK, DMG_base_main) %>% 
+  summarize(total_damage=max(total_damage)) %>% 
+  pivot_wider(id_cols=c("DEF_ATK", "DMG_base_main"), values_from="total_damage", 
+              names_from=c("feat_name", "style_name")) %>% 
+  group_by(DEF_ATK, DMG_base_main) %>% 
+  group_split() %>% 
+  map(best_value) %>% 
+  bind_rows() %>% 
+  pivot_longer(cols=c(-DEF_ATK, -DMG_base_main)) %>% 
+  mutate(name=gsub("_", " + ", name)) %>% 
+  mutate(name=str_wrap(name, width=25)) %>% 
+  filter(value > 0) %>% 
+  filter(!grepl("Crit", name)) %>% 
+  ggplot(aes(x=DEF_ATK, y=DMG_base_main, fill=name))+
+  geom_tile(color="black")+
+  #scale_fill_brewer(palette = "Set1")+
+  #scale_fill_manual(values=c("#377eb8", "#4daf4a", "#984ea3", "#ff7f00"))+
+  scale_fill_manual(values=c("#33a02c", "#b2df8a", "#e31a1c", "#fb9a99"))+
+  xlab("DEF-ATK")+
+  ylab("Average of Main-Hand and\n(if applicable) Off-hand Damage")+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+
+  labs(fill="")+
+  ggtitle("Figure 4. Maximum Damage from Tier 3 Combat Feats")
+
+```
+
+#### Jedi Characters
+
+Jedi have access to the Burst of Speed, Knight Speed, and Master Speed Force powers. These not only provide bonuses to defense, but more importantly for this model, Knight Speed and Master Speed grant additional main-hand attacks. Figures 5 and 6 show how these powers affect feat choice.
+
+The biggest change is that having one or two extra main-hand attacks is better than an extra off-hand attack, because main-hand weapons tend to be more damaging and have better accuracy. As a consequence, Dueling tends to be a better choice for Jedi than Two-Weapon Fighting. Also, the extra attacks from the Force powers makes Flurry/Rapid Shot less useful unless your weapons have very high average damage values. Again, Critical Strike/Sniper Shot is best against targets with very high defense values, since it gives no penalties to strike.
+
+```{r force_l2, echo=FALSE, message=FALSE, warning=FALSE}
+model_factors_level2_force <- expand.grid(
+  feats=c(#"None",
+          "Flurry/Rapid Shot 2", 
+          "Critical Strike/Sniper Shot 2", 
+          "Power Attack/Power Blast 2"),
+  styles=c(#"None",
+           "Dueling 2",
+           "Balanced Two-Weapon Fighting 2",
+           "Unbalanced Two-Weapon Fighting 2"),
+  force=c("Knight Speed"),
+  DEF_ATK=DEF_ATK,
+  DMG_base_main=damage_range,
+  DMG_base_offhand=damage_range,
+  keen_main=keenness_choices,
+  keen_offhand=keenness_choices,
+  threat_main=threat_range_choices,
+  threat_offhand=threat_range_choices,
+  n1=1,
+  n2=0,
+  modifiers1=0,
+  modifiers2=0,
+  crit_bonus=0,
+  power_attack=0)
+
+model_factors_level2_force <- process_inputs(model_factors_level2_force)
+  
+model_factors_level2_force %>% 
+  group_by(feat_name, style_name, DEF_ATK, DMG_base_main) %>% 
+  summarize(total_damage=max(total_damage)) %>% 
+  pivot_wider(id_cols=c("DEF_ATK", "DMG_base_main"), values_from="total_damage", 
+              names_from=c("feat_name", "style_name")) %>% 
+  group_by(DEF_ATK, DMG_base_main) %>% 
+  group_split() %>% 
+  map(best_value_force) %>% 
+  bind_rows() %>% 
+  pivot_longer(cols=c(-DEF_ATK, -DMG_base_main)) %>% 
+  mutate(name=gsub("_", " + ", name)) %>% 
+  filter(value > 0) %>% 
+  filter(name != "Critical Strike/ Sniper Shot + Balanced Two-Weapon Fighting") %>%
+  filter(name != "Critical Strike/ Sniper Shot + Unbalanced Two-Weapon Fighting") %>% 
+  mutate(name=str_wrap(name, width=25)) %>% 
+  ggplot(aes(x=DEF_ATK, y=DMG_base_main, fill=name))+
+  geom_tile(color="black")+
+  #scale_fill_brewer(palette = "Set1")+
+  #scale_fill_manual(values=c("#e41a1c", "#377eb8", "#4daf4a", "#ff7f00"))+
+  scale_fill_manual(values=c("#a6cee3", "#33a02c", "#b2df8a", "#fb9a99"))+
+  xlab("DEF-ATK")+
+  ylab("Average of Main-Hand and\n(if applicable) Off-hand Damage")+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+
+  labs(fill="")+
+  ggtitle("Figure 5. Maximum Damage from Knight Speed and Tier 2 Combat Feats")
+
+```
+
+
+
+```{r force_l3, echo=FALSE, message=FALSE, warning=FALSE}
+model_factors_level3_force <- expand.grid(
+  feats=c(#"None",
+          "Flurry/Rapid Shot 3", 
+          "Critical Strike/Sniper Shot 3", 
+          "Power Attack/Power Blast 3"),
+  styles=c(#"None",
+           "Dueling 3",
+           "Balanced Two-Weapon Fighting 3",
+           "Unbalanced Two-Weapon Fighting 3"),
+  force=c("Master Speed"),
+  DEF_ATK=DEF_ATK,
+  DMG_base_main=damage_range,
+  DMG_base_offhand=damage_range,
+  keen_main=keenness_choices,
+  keen_offhand=keenness_choices,
+  threat_main=threat_range_choices,
+  threat_offhand=threat_range_choices,
+  n1=1,
+  n2=0,
+  modifiers1=0,
+  modifiers2=0,
+  crit_bonus=0,
+  power_attack=0)
+
+model_factors_level3_force <- process_inputs(model_factors_level3_force)
+  
+model_factors_level3_force %>% 
+  group_by(feat_name, style_name, DEF_ATK, DMG_base_main) %>% 
+  summarize(total_damage=max(total_damage)) %>% 
+  pivot_wider(id_cols=c("DEF_ATK", "DMG_base_main"), values_from="total_damage", 
+              names_from=c("feat_name", "style_name")) %>% 
+  group_by(DEF_ATK, DMG_base_main) %>% 
+  group_split() %>% 
+  map(best_value_force) %>% 
+  bind_rows() %>% 
+  pivot_longer(cols=c(-DEF_ATK, -DMG_base_main)) %>% 
+  mutate(name=gsub("_", " + ", name)) %>% 
+  filter(value > 0) %>% 
+  filter(name != "Critical Strike/ Sniper Shot + Unbalanced Two-Weapon Fighting") %>% 
+  mutate(name=str_wrap(name, width=25)) %>% 
+  ggplot(aes(x=DEF_ATK, y=DMG_base_main, fill=name))+
+  geom_tile(color="black")+
+  #scale_fill_brewer(palette = "Set1")+
+  #scale_fill_manual(values=c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00"))+
+  scale_fill_manual(values=c("#1f78b4", "#a6cee3", "#fb9a99"))+
+  xlab("DEF-ATK")+
+  ylab("Average of Main-Hand and\n(if applicable) Off-hand Damage")+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+
+  labs(fill="")+
+  ggtitle("Figure 6. Maximum Damage from Master Speed and Tier 3 Combat Feats")
+
+```
+
+### Damage vs. Accuracy vs. Critical Threat Range vs. Keen
+
+From the model, we can also see the effects of improving each of the factors by one step, as shown in Figure 7. Improving the accuracy (decreasing the DEF-ATK value) gives the biggest gain in offense (you have to hit something to damage it after all), followed by improving the main-hand weapon damage and  off-hand weapon damage. Improving the critical threat ranges and keenness of weapons singly didn't have as much of an effect, so I combined the factors to make their effects more noticeable. 
+
+```{r main_effects, echo=FALSE, message=FALSE, warning=FALSE}
+
+model_factors_all <- bind_rows(model_factors_level1_noforce, model_factors_level2_force,
+                               model_factors_level3_noforce)
+
+DEF_ATK_max <- 
+  model_factors_all %>% 
+  group_by(DEF_ATK) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(DEF_ATK==max(DEF_ATK)) %>% 
+  rename(x=DEF_ATK) %>% 
+  mutate(name="Accuracy (DEF-ATK)")
+
+DEF_ATK_min <- 
+  model_factors_all %>% 
+  group_by(DEF_ATK) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(DEF_ATK==min(DEF_ATK)) %>% 
+  rename(x=DEF_ATK) %>% 
+  mutate(name="Accuracy (DEF-ATK)")
+
+DMG_main_max <-
+  model_factors_all %>% 
+  group_by(DMG_base_main) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(DMG_base_main==max(DMG_base_main)) %>% 
+  rename(x=DMG_base_main) %>% 
+  mutate(name="Main-Hand Weapon Damage")
+
+DMG_main_min <-
+  model_factors_all %>% 
+  group_by(DMG_base_main) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(DMG_base_main==min(DMG_base_main)) %>% 
+  rename(x=DMG_base_main) %>% 
+  mutate(name="Main-Hand Weapon Damage")
+
+DMG_offhand_max <-
+  model_factors_all %>% 
+  group_by(DMG_base_offhand) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(DMG_base_offhand==max(DMG_base_offhand)) %>% 
+  rename(x=DMG_base_offhand) %>% 
+  mutate(name="Off-Hand Weapon Damage")
+
+DMG_offhand_min <-
+  model_factors_all %>% 
+  group_by(DMG_base_offhand) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(DMG_base_offhand==1) %>% 
+  rename(x=DMG_base_offhand) %>% 
+  mutate(name="Off-Hand Weapon Damage")
+
+keen_threat_main_max <- 
+  model_factors_all %>% 
+  mutate(keen_threat_main=threat_main+threat_main*keen_main) %>% 
+  group_by(keen_threat_main) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(keen_threat_main==max(keen_threat_main)) %>% 
+  rename(x=keen_threat_main) %>% 
+  mutate(name="Main-Hand Critical Threat Range/ Keen")
+
+keen_threat_main_min <- 
+  model_factors_all %>% 
+  mutate(keen_threat_main=threat_main+threat_main*keen_main) %>% 
+  group_by(keen_threat_main) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(keen_threat_main==min(keen_threat_main)) %>% 
+  rename(x=keen_threat_main) %>% 
+  mutate(name="Main-Hand Critical Threat Range/ Keen")
+
+keen_threat_offhand_max <- 
+  model_factors_all %>% 
+  mutate(keen_threat_offhand=threat_offhand+threat_offhand*keen_offhand) %>% 
+  group_by(keen_threat_offhand) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(keen_threat_offhand==max(keen_threat_offhand)) %>% 
+  rename(x=keen_threat_offhand) %>% 
+  mutate(name="Off-Hand Critical Threat Range/ Keen")
+
+keen_threat_offhand_min <- 
+  model_factors_all %>% 
+  mutate(keen_threat_offhand=threat_offhand+threat_offhand*keen_offhand) %>% 
+  group_by(keen_threat_offhand) %>% 
+  summarize(mean=mean(total_damage)) %>% 
+  filter(keen_threat_offhand==min(keen_threat_offhand)) %>% 
+  rename(x=keen_threat_offhand) %>% 
+  mutate(name="Off-Hand Critical Threat Range/ Keen")
+
+factors_max <- bind_rows(DEF_ATK_max, DMG_main_max, DMG_offhand_max, keen_threat_main_max, 
+                         keen_threat_offhand_max)
+
+factors_min <- bind_rows(DEF_ATK_min, DMG_main_min, DMG_offhand_min, keen_threat_main_min, 
+                         keen_threat_offhand_min)
+
+factors_dydx <- data.frame(name=factors_max$name, dx=factors_max$x-factors_min$x, 
+                           dy=factors_max$mean-factors_min$mean)
+
+factors_dydx$dx <- round(factors_dydx$dx,2)
+factors_dydx$dx[factors_dydx$dx==0.15] <- 3 #convert to factor
+factors_dydx <- 
+  factors_dydx  %>% 
+  mutate(dydx = abs(factors_dydx$dy/factors_dydx$dx)) %>% 
+  arrange(-dydx) %>% 
+  mutate(order=seq(1, nrow(factors_dydx), 1),
+         name=str_wrap(name, width=10)) %>% 
+  mutate(std_dydx=dydx/min(dydx))
+
+ggplot(factors_dydx, aes(x=as.factor(order), y=std_dydx))+
+  geom_col(color="black", fill="#377eb8")+
+  scale_x_discrete(labels=factors_dydx$name)+
+  ylab("Standardized Effect")+
+  xlab("")+
+  ggtitle("Figure 7. Factor Main Effects")
+  
+```
+
+
+
+### Balanced vs. Unbalanced Weapons
+
+If everything is equal, balanced off-hand weapons work better than unbalanced ones because there is no penalty to accuracy. However, things aren't always equal -- balanced weapons tend to be weaker than unbalanced ones. How much more damaging to off-hand weapons need to be to compensate for the loss of accuracy?
+
+To derive this, we want to begin with
+\begin{equation}
+  Damage_{total\:unbalanced} \geq Damage_{total\:balanced}
+  \tag{10}
+\end{equation}
+
+Which means
+\begin{equation}
+  n_1 \times Weapon_{damage\:1} \times [1.05 - 0.05 \times (DEF-ATK-Modifiers_1+2)] \times \\\
+  (1+P_{threat\:1} \times Crit_{bonus}+Keen_1) + \\\
+  n_1 \times Power\:Attack \times [1.05 - 0.05 \times (DEF-ATK_1-Modifiers_1)] + \\\
+  n_2 \times Weapon_{damage\:2\:unbalanced} \times [1.05 - 0.05 \times (DEF-ATK-Modifiers_2)] \times \\\
+  (1+P_{threat\:2} \times Crit_{bonus}+Keen_2) + \\\
+  n_2 \times Power\:Attack \times [1.05 - 0.05 \times (DEF-ATK-Modifiers_2)] \geq \\\
+  n_1 \times Weapon_{damage\:1} \times [1.05 - 0.05 \times (DEF-ATK-Modifiers_1)] \times \\\
+  (1+P_{threat\:1} \times Crit_{bonus}+Keen_1) + \\\
+  n_1 \times Power\:Attack \times [1.05 - 0.05 \times (DEF-ATK_1-Modifiers_1)] + \\\
+  n_2 \times Weapon_{damage\:2\:balanced} \times [1.05 - 0.05 \times (DEF-ATK-Modifiers_2)] \times \\\
+  (1+P_{threat\:2} \times Crit_{bonus}+Keen_2) + \\\
+  n_2 \times Power\:Attack \times [1.05 - 0.05 \times (DEF-ATK-Modifiers_2)]
+  \tag{11}
+\end{equation}
+
+Which simplifies to
+
+\begin{equation}
+  Weapon_{damage\:2\:unbalanced} - Weapon_{damage\:2\:balanced} \geq \frac{0.1 \times n_1 \times Weapon_{damage\:1}}{1.05-0.05 \times (DEF-ATK)}
+  \tag{12}
+\end{equation}
+
+Using an unbalanced off-hand weapon always impairs the performance of the main-hand weapon. The more main-hand attacks and the higher the damage rating of the main-hand weapon, the higher the damage rating of the unbalanced off-hand weapon needs to be to keep up. In other words, unless the unbalanced weapon is significantly more powerful than the balanced weapon, you're better off with a balanced off-hand weapon. Figure 8 shows the additional off-hand weapon damage required for different numbers of main-hand attacks, main-hand weapon damages and DEF-ATK values.
+
+
+```{r balance_noforce, echo=FALSE, message=FALSE, warning=FALSE}
+model_factors_balance <- expand.grid(
+  DEF_ATK=DEF_ATK,
+  DMG_base_main=damage_range,
+  n1=seq(1, 4, 1))
+
+model_factors_balance <-
+  model_factors_balance %>% 
+  mutate(unbal_bal=0.1*n1*DMG_base_main/(1.05-0.05*DEF_ATK),
+         n1_name=paste("Main-Hand Attacks: ", n1, sep="")) %>% 
+  mutate(cut_unbal_bal=cut(unbal_bal, breaks = c(0, 1, 2, 3, 4, 6, 10), include.lowest = TRUE))
+
+model_factors_balance %>% 
+  ggplot(aes(x=DEF_ATK, y=DMG_base_main, fill=cut_number(unbal_bal,5)))+
+  geom_tile(color="grey50")+
+  facet_wrap(~n1_name)+
+  scale_fill_viridis_d(direction = -1, option = "B")+
+  ylab("Main-Hand Damage")+
+  xlab("DEF-ATK")+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+
+  labs(fill="Additional\nOff-Hand Weapon\nDamage for\nUnbalanced Weapons")+
+  ggtitle("Figure 8: Balanced vs. Unbalanced Weapon Damage")
+
+```
+
+## Try the Interactive Model
+
+With all the different combinations of feats, weapons, and Force powers available in *KOTOR*, it's difficult to precisely cover every situation. To help, I've made an interactive version of the model at https://statsjedi.shinyapps.io/shiny_kotor/, where you can fiddle with the settings and see how different combinations work.
+
+Note that the free hosting service only allows 25 active hours of usage a month, after which time it becomes unavailable until the next month. 
+
+Alternatively, you can download the source code for the interactive model from my GitHub and run it locally.
+
+## A Note on Scoundrels
+
+The dominant belief appears to be that Scoundrels are support characters that are only good for their skill set. However, this overlooks their Sneak Attack ability, which at level 20 can deal 9-54 points of damage per attack in addition to whatever the normal weapon damage is. In other words, think of Sneak Attack as the most devastating weapon in the game. A Jedi with 5 or 7 levels of Scoundrel, for a Sneak Attack of 3-18 or 4-24 points, is capable of dealing much more damage than a Soldier/Jedi ever could.
+
+The difficulty with the Sneak Attack is that it only happens on attacks coming from behind a target, made against a stunned target, or when the Scoundrel is in stealth mode, so it's important to make these conditions happen as often as possible. Force powers can stun enemies, leaving them wide open, but they're not always available. Some melee and energy weapons have a 25% (or 50% for the Ratakan Battle Wand) chance of stunning enemies, but the low DC of 10 only makes them useful for the early levels.
+
+This is where Critical Strike and Sniper Shot come in. It's not about multiplying the threat range, it's about the chance of stunning your foe, leaving them wide open to a sneak attack – and scoundrels get the first level of these feats for free! The DC that enemies need to overcome to avoid being stunned depends on the character's Strength (Critical Strike) or Intelligence (Sniper Shot) attribute.
+
+Alert reader Icecreamnao made a compelling argument that Mission, with her high INT, high DEX, and low VPs, is well-positioned for Sniper Shot. If her extra attribute points are used to boost her INT and Master Valor is cast on her, her stunning ability has an impressive DC of 27 at level 20! Main characters that begin as Scoundrels canalso benefit from Critical Strike's stunning ability, but Force powers will generally give higher stunning DCs and affect multiple enemies at once. 
+
+Unfortunately, Darth Malak seems to be immune to stunning, making the likelihood of sneak attacking him pretty minuscule. However, he can be caught by Force Whirlwind, which would leave him open to sneak attacks.
+
+## Defense and Savings Throws for Select Enemies
+
+I used Fred Tetra's program KOTOR Tool to peek inside some of the files in KOTOR, and recorded the DEF
+(including armor, Force Powers, and other modifiers) and Savings Throw values for various enemies
+throughout the game. Note that Calo Nord and Darth Bandon can appear at different points at the game
+depending on what order you visit different areas, and their stats depend on what planet you encounter them on. Also, Bastila and Darth Malak are immune to a whole range of status ailments, including stunning.
+
+Table 4. DEF and savings throw values for various enemies in *KOTOR*
+
+Location    | Name              | DEF  | Fortitude Save| Reflex Save | Will Save
+------------|-------------------|-----:|--------------:|------------:|-----------:
+Endar Spire | Sith Soldier      | 6    | 3             | 2           | 1
+Taris       | Brejik            | 12   | 2             | 7           | 4
+Taris       | Bendak Starkiller | 12   | 12            | 11          | 11
+Dantooine   | Juhani            | 14   | 6             | 9           | 6
+Dantooine   | Zulan Sentar      | 18   | 20            | 16          | 14
+Kashyyyk    | Chuundar          | 9    | 12            | 11          | 11
+Kashyyyk    | Dark Jedi         | 14   | 7             | 8           | 6
+Leviathan   | Sith Elite Trooper| 18   | 11            | 8           | 4
+Leviathan   | Saul Karath       | 18   | 13            | 10          | 8
+Leviathan   | Darth Malak       | 22   | 24            | 25          | 21
+Korriban    | Yuthura Ban       | 16   | 7             | 8           | 6
+Korriban    | Uthar Wynn        | 22   | 11            | 14          | 10
+Unknown     | Planet Bastilla   | 14   | 14            | 20          | 10
+Unknown     | Planet The One    | 18   | 15            | 12          | 12
+Various     | Calo Nord         | 13-21| 13-22         | 10-19       | 7-16
+Various     | Darth Bandon      | 18-28| 24-29         | 25-32       | 25-28
+Star Forge  | Darth Malak       | 32   | 38            | 32          | 27
+
+## Conclusions and Recommendations
+
+* The most damaging weapons in the game tend to be melee weapons and lightsabers. 
+  + Carth, Canderous, and Zaalbar should use melee weapons over ranged weapons in order to maximize their damage potential. 
+  + Mission could use either melee or ranged, but her relatively low number of Vitality Points
+(coupled with her high intelligence bonus for the Sniper Shot feat) makes her better suited for ranged
+weapons. 
+  + Jedi should use lightsabers.
+  + Droids have to use ranged weapons.
+* Changing the Critical Threat Range and Keen status of weapons have little effect on the total amount of damage dealt in a combat round.
+* Increasing the accuracy of your weapon usually gives you the biggest increase in total damage per
+combat round, followed by increasing damage. Increasing the critical threat range and/or keenness of weapons gives the smallest bump in offense.
+* If a character is wielding two weapons, it is generally advisable to have a balanced weapon in the off-hand, unless an unbalanced weapon would cause significantly more damage. The greater the number of main-hand attacks, the more additional damage an unbalanced weapon needs to do to keep up with a balanced weapon.
+* Use Figures 2-6 to determine what combination of Flurry/Rapid Shot, Critical Strike/Sniper Shot, Power Attack/Power Blast, Dueling, and Two-Weapon Fighting 1 provides optimal offense. Generally, Jedi characters should use Dueling, while non-Jedi characters could use either Dueling or Two-Weapon Fighting.
+* Mission should use Sniper Shot and boost her INT to maximize her chance of successfully launching a
+deadly Sneak Attack.
+
+## Acknowledgements
+Thanks to
+
+* You, the reader, for making it through this FAQ.
+* Icecreamnao for showing me the importance of Critical Strike and Sniper Shot for Jedi equipped with
+high-damage weapons and for Scoundrels, as well as recommending a closer look at single vs. dual
+weilding and balanced vs. unbalanced weapons.
+* KD for suggesting I adjust my model to look at Tier 1 and Tier 2 feats in addition to Tier 3 feats.
+* Bioware and Wizards of the Coast for developing KOTOR and Star Wars: The Roleplaying Game.
+* NWNWiki for its discussion of how the Critical Threat Range works (nwn.wikia.com/wiki/Threat_roll).
+* JPaterson for his Item FAQ (www.gamefaqs.com/xbox/556553-star-wars-knights-of-the-old-republic
+/faqs/29280).
+* Wamumor for his Item FAQ (www.gamefaqs.com/xbox/556553-star-wars-knights-of-the-old-republic
+/faqs/29044).
+* Fred Tetra for developing the KOTOR Tool (deadlystream.com/forum/topic/1949-downloadkotor-tool/) for
+looking inside the game's files.
+
+If you enjoy in-depth FAQs about the minutiae of old games, be sure to check out my Morale Guide for
+Vanguard Bandits, hosted at Neoseeker (http://www.neoseeker.com/vanguardbandits/faqs/2635845-vanguardbandits-morale.html) and GameFAQs (https://www.gamefaqs.com/ps/199182-vanguard-bandits/faqs/74323).
+
+## Contact Info
+Questions? Comments? Find something wrong? Email me at statsjedi (at) gmail (dot) com.
+
+Source code for this FAQ and for the interactive model are at my GitHub.
+
+## Revision History
+* Version 1.0, 9 March 2015
+* Version 2.0, 12 September 2015
+* Version 3.0, December 2020
+
+##Licensing
+
+This work is licensed under the Creative Commons Attribution-ShareAlike 4.0 International License. To view a copy of this license, visit http://creativecommons.org/licenses/by-sa/4.0/.
