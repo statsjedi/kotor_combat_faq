@@ -2,24 +2,28 @@ library(shiny)
 library(tidyverse)
 library(plotly)
 
-combat_feat_choices <- c("Flurry/Rapid Shot 1", 
-                         "Flurry/Rapid Shot 2", 
-                         "Flurry/Rapid Shot 3",
-                         "Critical Strike/Sniper Shot 1", 
-                         "Critical Strike/Sniper Shot 2",
-                         "Critical Strike/Sniper Shot 3",
-                         "Power Attack/Power Blast 1",
-                         "Power Attack/Power Blast 2", 
-                         "Power Attack/Power Blast 3",
-                         "None")
+combat_feat_choices <- c(
+    "Flurry/Rapid Shot 1", 
+    "Flurry/Rapid Shot 2", 
+    "Flurry/Rapid Shot 3",
+    "Critical Strike/Sniper Shot 1", 
+    "Critical Strike/Sniper Shot 2",
+    "Critical Strike/Sniper Shot 3",
+    "Power Attack/Power Blast 1",
+    "Power Attack/Power Blast 2", 
+    "Power Attack/Power Blast 3",
+    "None"
+)
 
-combat_style_choices <- c("Dueling 1", 
-                          "Dueling 2", 
-                          "Dueling 3",
-                          "Two-Weapon Fighting 1", 
-                          "Two-Weapon Fighting 2",
-                          "Two-Weapon Fighting 3",
-                          "None")
+combat_style_choices <- c(
+    "Dueling 1", 
+    "Dueling 2", 
+    "Dueling 3",
+    "Two-Weapon Fighting 1", 
+    "Two-Weapon Fighting 2",
+    "Two-Weapon Fighting 3",
+    "None"
+)
 
 force_choices <- c("None", "Burst of Speed", "Knight Speed", "Master Speed")
 
@@ -27,9 +31,10 @@ keenness_choices <- c(0, 1) #0=not keen, 1=keen
 
 threat_range_choices <- c(0.05, 0.1) #0.05=20-20, 0.1=19-20
 
-balance_choices <- c(0, -2) #balanced, unbalanced
+balance_choices <- c(2, 0) #balanced, unbalanced
 
-DEF_ATK <- seq(2, 20, 1)
+#DEF_ATK <- seq(2, 20, 1)
+DEF_ATK <- seq(-10, 30, 1)
 
 map_mods <- function(myFactors){ #this calculates the bonuses for each feat/style/force
     if(all(myFactors$styles=="Dueling 1")){
@@ -72,13 +77,13 @@ map_mods <- function(myFactors){ #this calculates the bonuses for each feat/styl
         myFactors$modifiers2 <- myFactors$modifiers2-1
     }
     if(all(myFactors$feats=="Critical Strike/Sniper Shot 1")){
-        myFactors$crit_bonus <- 2
+        myFactors$threat_mult <- 2
     }
     if(all(myFactors$feats=="Critical Strike/Sniper Shot 2")){
-        myFactors$crit_bonus <- 3
+        myFactors$threat_mult <- 3
     }
     if(all(myFactors$feats=="Critical Strike/Sniper Shot 3")){
-        myFactors$crit_bonus <- 4
+        myFactors$threat_mult <- 4
     }
     if(all(myFactors$feats=="Power Attack/Power Blast 1")){
         myFactors$power_attack <- 5
@@ -96,10 +101,10 @@ map_mods <- function(myFactors){ #this calculates the bonuses for each feat/styl
         myFactors$modifiers2 <- myFactors$modifiers2-3
     }
     if(all(myFactors$force=="Knight Speed")){
-        myFactors$n1 <- myFactors$n1+1
+        myFactors$n1 <- myFactors$n1 + 1
     }
     if(all(myFactors$force=="Master Speed")){
-        myFactors$n1 <- myFactors$n1+2
+        myFactors$n1 <- myFactors$n1 + 2
     }
     return(myFactors) 
 }
@@ -109,7 +114,7 @@ map_mods <- function(myFactors){ #this calculates the bonuses for each feat/styl
 ui <- fluidPage(
 
     # Application title
-    titlePanel("KOTOR Combat Feat Comparisons"),
+    titlePanel("KotOR Combat Feat Comparisons"),
 
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
@@ -135,40 +140,43 @@ ui <- fluidPage(
                                           choiceNames = c("None", "Level 1", "Level 2", "Level 3"),
                                           choiceValues = c("None", "1", "2", "3")
                                           ),
-                       radioButtons("force", "Force Powers", 
-                                    choiceNames = force_choices,
-                                    choiceValues = force_choices
-                       )
-                            ),
-                     column(width=4, 
+                        radioButtons(
+                            "force", "Force Powers", 
+                            choiceNames = force_choices,
+                            choiceValues = force_choices
+                        )
+                    ),
+                    column(width=4, 
                             textInput("offhand_max", "Off-Hand Weapon Maximum Damage", value = 6),
                             textInput("offhand_min", "Off-Hand Weapon Minimum Damage", value = 1),
-                            radioButtons("offhand_keen", "Off-Hand Weapon Keenness", 
-                                         choiceNames = c("Not Keen", "Keen"),
-                                         choiceValues = keenness_choices
-                                         ),
-                            radioButtons("threat_range_offhand", "Off-Hand Hand Weapon Threat Range",
-                                         choiceNames = c("20-20", "19-20"),
-                                         choiceValues = threat_range_choices
-                                         ),
-                            radioButtons("offhand_balance", "Off-Hand Weapon Balance", 
-                                         choiceNames = c("Balanced", "Unbalanced"),
-                                         choiceValues = balance_choices
+                            radioButtons(
+                                "offhand_keen", "Off-Hand Weapon Keenness", 
+                                choiceNames = c("Not Keen", "Keen"),
+                                choiceValues = keenness_choices
                             ),
-                            radioButtons("styles", "Combat Style Level:
-                                          Dueling, 
-                                          Two-Weapon Fighting", 
-                                        choiceNames = c("None", "Level 1", "Level 2", "Level 3"),
-                                        choiceValues = c("None", "1", "2", "3")
-                                               )
+                            radioButtons(
+                                "threat_range_offhand", "Off-Hand Hand Weapon Threat Range",
+                                choiceNames = c("20-20", "19-20"),
+                                choiceValues = threat_range_choices
+                            ),
+                            radioButtons(
+                                "offhand_balance", "Off-Hand Weapon Balance", 
+                                choiceNames = c("Balanced", "Unbalanced"),
+                                choiceValues = balance_choices
+                            ),
+                            radioButtons(
+                                "styles", "Combat Style Level: Dueling, Two-Weapon Fighting", 
+                                choiceNames = c("None", "Level 1", "Level 2", "Level 3"),
+                                choiceValues = c("None", "1", "2", "3")
                             )
+                    )
                 )
             ),
         
-        mainPanel(width=7,
-                  plotlyOutput("plot", width="100%", height="800px")
-                  #tableOutput("table") #for debugging purposes
-
+        mainPanel(
+            width=7,
+            plotlyOutput("plot", width="100%", height="800px")
+            #tableOutput("table") #for debugging purposes
         )
     )
 )
@@ -188,8 +196,9 @@ server <- function(input, output) {
         n2=0,
         modifiers1=0,
         modifiers2=0,
-        crit_bonus=0,
-        power_attack=0)
+        threat_mult=1,
+        power_attack=0
+    )
     
     model_factors <- 
         model_factors %>% 
@@ -222,13 +231,20 @@ server <- function(input, output) {
                    keen_main=main_keen*threat_main,
                    keen_offhand=offhand_keen*threat_offhand,
                    balance=balance_choice) %>% 
-            mutate(balance=replace(balance, !grepl("Weapon", styles), 0), #this makes sure unbalanced only affects two-weapon fighting
-                   total_damage=n1*DMG_main*(1.05-0.05*(DEF_ATK-modifiers1-balance))*
-                       (1+threat_main*crit_bonus+keen_main*threat_main)+
-                       n1*power_attack*(1.05-0.05*(DEF_ATK-modifiers1-balance))+
-                       n2*DMG_offhand*(1.05-0.05*(DEF_ATK-modifiers2))*
-                       (1+threat_offhand*crit_bonus+keen_offhand*threat_offhand)+
-                       n1*power_attack*(1.05-0.05*(DEF_ATK-modifiers2))) %>% 
+            mutate(
+                balance=replace(balance, !grepl("Weapon", styles), 0), #this makes sure unbalanced only affects two-weapon fighting
+                total_damage =
+                    n1 * (DMG_main + power_attack) * (
+                        1 * pmax(pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers1 - balance), 0.95), 0.05) - threat_main * (threat_mult + keen_main), 0) + # Non-threat hit
+                        pmin(threat_main * (threat_mult + keen_main), pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers1 - balance), 0.95), 0.05)) * # Check threat
+                        (1 + 2 * pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers1 - balance), 1), 0))  # Crit roll has no automatic success / failure
+                    ) +
+                    n2 * (DMG_offhand + power_attack) * (
+                        1 * pmax(pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers2), 0.95), 0.05) - threat_offhand * (threat_mult + keen_offhand), 0) + # Non-threat hit
+                        pmin(threat_offhand * (threat_mult + keen_offhand), pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers2), 0.95), 0.05)) * # Check threat
+                        (1 + 2 * pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers2), 1), 0))  # Crit roll has no automatic success / failure
+                    )
+            ) %>% 
             mutate(total_damage=replace(total_damage, total_damage<0, 0))
         
         model_factors$feats2 <- gsub("/", "/\\\n", model_factors$feats)
@@ -277,4 +293,3 @@ server <- function(input, output) {
 
 # Run the application 
 shinyApp(ui = ui, server = server)
-
