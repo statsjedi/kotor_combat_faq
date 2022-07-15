@@ -237,12 +237,12 @@ server <- function(input, output) {
                     n1 * (DMG_main + power_attack) * (
                         1 * pmax(pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers1 - balance), 0.95), 0.05) - threat_main * (threat_mult + keen_main), 0) + # Non-threat hit
                         pmin(threat_main * (threat_mult + keen_main), pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers1 - balance), 0.95), 0.05)) * # Check threat
-                        (1 + 2 * pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers1 - balance), 1), 0))  # Crit roll has no automatic success / failure
+                        (1 + 1 * pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers1 - balance), 1), 0))  # Crit roll has no automatic success / failure
                     ) +
                     n2 * (DMG_offhand + power_attack) * (
                         1 * pmax(pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers2), 0.95), 0.05) - threat_offhand * (threat_mult + keen_offhand), 0) + # Non-threat hit
                         pmin(threat_offhand * (threat_mult + keen_offhand), pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers2), 0.95), 0.05)) * # Check threat
-                        (1 + 2 * pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers2), 1), 0))  # Crit roll has no automatic success / failure
+                        (1 + 1 * pmax(pmin(1.05 - 0.05 * (DEF_ATK - modifiers2), 1), 0))  # Crit roll has no automatic success / failure
                     )
             ) %>% 
             mutate(total_damage=replace(total_damage, total_damage<0, 0))
